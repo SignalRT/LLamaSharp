@@ -12,23 +12,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build: [linux-debug, linux-release, windows-debug, windows-release, macos-debug, macos-release]
+        build: [linux-release, windows-release, macos-release]
         include:
-          - build: linux-debug
-            os: ubuntu-latest
-            config: debug
           - build: linux-release
             os: ubuntu-latest
             config: release          
-          - build: macos-debug
-            os: macos-latest-xlarge
-            config: debug
           - build: macos-release
             os: macos-latest-xlarge
             config: release
-          - build: windows-debug
-            os: windows-2019
-            config: debug
           - build: windows-release
             os: windows-2019
             config: release
