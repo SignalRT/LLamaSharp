@@ -43,7 +43,7 @@ jobs:
     - name: Build
       run: dotnet build LLamaSharp.sln -c ${{ matrix.config }} --no-restore
     - name: Test
-      run: dotnet test LLamaSharp.sln -c ${{ matrix.config }} -l "console;verbosity=detailed" --diag:logs/log.txt
+      run: dotnet test LLamaSharp.sln -c ${{ matrix.config }} --no-build -l "console;verbosity=detailed" --diag:logs/log.txt
     - name: Upload artifacts
       if: always()
       uses: actions/upload-artifact@v3
