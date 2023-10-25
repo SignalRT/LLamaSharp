@@ -36,17 +36,15 @@ jobs:
         key: "unit_test_models"
         path: LLama.Unittest/Models
     #  workaround for actions/setup-dotnet#155
-    - name: Clear package cache
-      run: dotnet clean LLamaSharp.sln && dotnet nuget locals all --clear
     - name: Restore packages
       run: dotnet restore LLamaSharp.sln
-    - name: Build
-      run: dotnet build LLamaSharp.sln -c ${{ matrix.config }} --no-restore
     - name: Test
-      run: dotnet test LLamaSharp.sln -c ${{ matrix.config }} --no-build -l "console;verbosity=detailed" --diag:logs/log.txt
-    - name: Upload artifacts
-      if: always()
+      run: dotnet test -c ${{ matrix.config }} --logger trx --results-directory "TestResults-${{ matrix.dotnet-version }}"
+    - name: Upload dotnet test results
       uses: actions/upload-artifact@v3
       with:
-        path: logs/
-        name: logs
+        name: dotnet-results-${{ matrix.dotnet-version }}
+        path: TestResults-${{ matrix.dotnet-version }}
+        # Use always() to always run this step to publish test results when there are test failures
+        if: ${{ always() }} 
+
