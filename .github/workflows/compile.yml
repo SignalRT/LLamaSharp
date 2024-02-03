@@ -2,7 +2,11 @@ name: Update Binaries
 
 on:
   workflow_dispatch:
-    inputs: {}
+    inputs:
+      llama_cpp_commit:
+        description: 'Branch, tag, or commit to use for llama.cpp'
+        required: true
+        default: 'master'
   push:
     branches: [cron_job]
   #schedule:
@@ -29,9 +33,11 @@ jobs:
             defines: '-DLLAMA_AVX512=ON'
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           repository: ggerganov/llama.cpp
+          fetch-depth: 0
+          ref: '${{ github.event.inputs.llama_cpp_commit }}'
       - name: Build
         id: cmake_build
         run: |
@@ -39,7 +45,7 @@ jobs:
           cd build
           cmake .. ${{ env.COMMON_DEFINE }} ${{ matrix.defines }}
           cmake --build . --config Release -j ${env:NUMBER_OF_PROCESSORS}
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           path: ./build/libllama.so
           name: llama-bin-linux-${{ matrix.build }}-x64.so
@@ -60,9 +66,11 @@ jobs:
             defines: '-DLLAMA_AVX512=ON -DLLAMA_AVX512_VBMI=ON -DLLAMA_AVX512_VNNI=ON'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           repository: ggerganov/llama.cpp
+          fetch-depth: 0
+          ref: '${{ github.event.inputs.llama_cpp_commit }}'
 
       - name: Build
         id: cmake_build
@@ -73,11 +81,72 @@ jobs:
           cmake --build . --config Release -j ${env:NUMBER_OF_PROCESSORS}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           path: .\build\bin\Release\llama.dll
           name: llama-bin-win-${{ matrix.build }}-x64.dll
 
+  compile-clblast:
+    name: Compile (clblast) - ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [
+#          ubuntu-20.04, # This is not built in llalam.cpp, so for now we'll skip it
+          windows-latest
+        ]
+    env:
+      OPENBLAS_VERSION: 0.3.23
+      OPENCL_VERSION: 2023.04.17
+      CLBLAST_VERSION: 1.6.0
+      VULKAN_VERSION: 1.3.261.1
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Clone
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ggerganov/llama.cpp
+      - name: Download dependencies - Windows
+        id: get_opencl
+        if: ${{ matrix.os == 'windows-latest' }}
+        run: |
+          curl.exe -o $env:RUNNER_TEMP/opencl.zip -L "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/v${env:OPENCL_VERSION}/OpenCL-SDK-v${env:OPENCL_VERSION}-Win-x64.zip"
+          mkdir $env:RUNNER_TEMP/opencl
+          tar.exe -xvf $env:RUNNER_TEMP/opencl.zip --strip-components=1 -C $env:RUNNER_TEMP/opencl
+          curl.exe -o $env:RUNNER_TEMP/clblast.7z -L "https://github.com/CNugteren/CLBlast/releases/download/${env:CLBLAST_VERSION}/CLBlast-${env:CLBLAST_VERSION}-windows-x64.7z"
+          curl.exe -o $env:RUNNER_TEMP/CLBlast.LICENSE.txt -L "https://github.com/CNugteren/CLBlast/raw/${env:CLBLAST_VERSION}/LICENSE"
+          7z x "-o${env:RUNNER_TEMP}" $env:RUNNER_TEMP/clblast.7z
+          rename-item $env:RUNNER_TEMP/CLBlast-${env:CLBLAST_VERSION}-windows-x64 clblast
+          foreach ($f in (gci -Recurse -Path "$env:RUNNER_TEMP/clblast" -Filter '*.cmake')) {
+            $txt = Get-Content -Path $f -Raw
+            $txt.Replace('C:/vcpkg/packages/opencl_x64-windows/', "$($env:RUNNER_TEMP.Replace('\','/'))/opencl/") | Set-Content -Path $f -Encoding UTF8
+          }
+#      - name: Download dependencies - Linux
+#        if: ${{ matrix.os == "ubuntu-20.04" }}
+#        run: |
+#          wget -qO - http://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+#          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-focal.list http://packages.lunarg.com/vulkan/lunarg-vulkan-focal.list
+#          sudo add-apt-repository ppa:cnugteren/clblast
+#          sudo apt update
+#          sudo apt install vulkan-sdk libclblast-dev
+
+      - name: Build
+        id: cmake_build
+        run: |
+          mkdir build
+          cd build
+          cmake .. ${{ env.COMMON_DEFINE }} -DLLAMA_CLBLAST=ON -DCMAKE_PREFIX_PATH="$env:RUNNER_TEMP/clblast"
+          cmake --build . --config Release -j ${env:NUMBER_OF_PROCESSORS}
+          ls -R
+
+      - name: Upload artifacts (Windows)
+        if: ${{ matrix.os == 'windows-latest' }}
+        uses: actions/upload-artifact@v4
+        with:
+          path: .\build\bin\Release\llama.dll
+          name: llama-bin-win-clblast-x64.dll
+          
   compile-cublas:
     name: Compile (cublas)
     strategy:
@@ -89,11 +158,13 @@ jobs:
     steps:
       - name: Clone
         id: checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: ggerganov/llama.cpp
+          fetch-depth: 0
+          ref: '${{ github.event.inputs.llama_cpp_commit }}'
 
-      - uses: Jimver/cuda-toolkit@v0.2.11
+      - uses: Jimver/cuda-toolkit@v0.2.14
         if: runner.os == 'Windows'
         id: cuda-toolkit-windows
         with:
@@ -101,7 +172,7 @@ jobs:
           method: 'network'
           sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
 
-      - uses: Jimver/cuda-toolkit@v0.2.11
+      - uses: Jimver/cuda-toolkit@v0.2.14
         if: runner.os == 'Linux'
         id: cuda-toolkit-linux
         with:
@@ -120,13 +191,13 @@ jobs:
 
       - name: Upload artifacts (Windows)
         if: ${{ matrix.os == 'windows-latest' }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           path: .\build\bin\Release\llama.dll
           name: llama-bin-win-cublas-cu${{ matrix.cuda }}-x64.dll
       - name: Upload artifacts (Linux)
         if: ${{ matrix.os == 'ubuntu-20.04' }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           path: ./build/libllama.so
           name: llama-bin-linux-cublas-cu${{ matrix.cuda }}-x64.so
@@ -143,9 +214,11 @@ jobs:
             defines: '-DCMAKE_OSX_ARCHITECTURES=x86_64 -DLLAMA_METAL=OFF -DLLAMA_AVX=ON -DLLAMA_AVX2=ON'
     runs-on: macos-latest   
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           repository: ggerganov/llama.cpp
+          fetch-depth: 0
+          ref: '${{ github.event.inputs.llama_cpp_commit }}'
       - name: Dependencies
         continue-on-error: true
         run: |
@@ -158,13 +231,13 @@ jobs:
           cmake .. ${{ env.COMMON_DEFINE }} ${{ matrix.defines }}
           cmake --build . --config Release -j ${env:NUMBER_OF_PROCESSORS}
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           path: ./build/libllama.dylib
           name: llama-bin-osx-${{ matrix.build }}.dylib
       - name: Upload Metal
         if: ${{ matrix.build != 'x64' }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           path: ./build/bin/ggml-metal.metal
           name: ggml-metal.metal
@@ -177,49 +250,43 @@ jobs:
       "compile-linux",
       "compile-macos",
       "compile-windows",
-      "compile-cublas"
+      "compile-cublas",
+      "compile-clblast"
     ]
     steps:      
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
+      - name: List Files
+        run: ls -R
       - name: Rearrange Files
         run: |
-          ls -R
-
-          mkdir deps
-
-          mkdir deps/avx
-          mkdir deps/avx2
-          mkdir deps/avx512
-
-          mkdir deps/osx-arm64
-          mkdir deps/osx-x64
-
-          mkdir deps/cu11.7.1
-          mkdir deps/cu12.1.0
+          # Make all directories at once
+          mkdir --parents deps/{avx,avx2,avx512,osx-arm64,osx-x64,cu11.7.1,cu12.1.0,clblast}
 
           cp artifacts/llama-bin-linux-noavx-x64.so/libllama.so  deps/libllama.so
           cp artifacts/llama-bin-linux-avx-x64.so/libllama.so    deps/avx/libllama.so
           cp artifacts/llama-bin-linux-avx2-x64.so/libllama.so   deps/avx2/libllama.so
           cp artifacts/llama-bin-linux-avx512-x64.so/libllama.so deps/avx512/libllama.so
 
-          cp artifacts/llama-bin-win-noavx-x64.dll/llama.dll  deps/libllama.dll
-          cp artifacts/llama-bin-win-avx-x64.dll/llama.dll    deps/avx/libllama.dll
-          cp artifacts/llama-bin-win-avx2-x64.dll/llama.dll   deps/avx2/libllama.dll
-          cp artifacts/llama-bin-win-avx512-x64.dll/llama.dll deps/avx512/libllama.dll
+          cp artifacts/llama-bin-win-noavx-x64.dll/llama.dll  deps/llama.dll
+          cp artifacts/llama-bin-win-avx-x64.dll/llama.dll    deps/avx/llama.dll
+          cp artifacts/llama-bin-win-avx2-x64.dll/llama.dll   deps/avx2/llama.dll
+          cp artifacts/llama-bin-win-avx512-x64.dll/llama.dll deps/avx512/llama.dll
 
           cp artifacts/llama-bin-osx-arm64.dylib/libllama.dylib deps/osx-arm64/libllama.dylib
           cp artifacts/ggml-metal.metal/ggml-metal.metal        deps/osx-arm64/ggml-metal.metal
           cp artifacts/llama-bin-osx-x64.dylib/libllama.dylib   deps/osx-x64/libllama.dylib
 
-          cp artifacts/llama-bin-win-cublas-cu11.7.1-x64.dll/llama.dll    deps/cu11.7.1/libllama.dll
+          cp artifacts/llama-bin-win-cublas-cu11.7.1-x64.dll/llama.dll    deps/cu11.7.1/llama.dll
           cp artifacts/llama-bin-linux-cublas-cu11.7.1-x64.so/libllama.so deps/cu11.7.1/libllama.so
-          cp artifacts/llama-bin-win-cublas-cu12.1.0-x64.dll/llama.dll    deps/cu12.1.0/libllama.dll
+          cp artifacts/llama-bin-win-cublas-cu12.1.0-x64.dll/llama.dll    deps/cu12.1.0/llama.dll
           cp artifacts/llama-bin-linux-cublas-cu12.1.0-x64.so/libllama.so deps/cu12.1.0/libllama.so
+          
+          cp artifacts/llama-bin-win-clblast-x64.dll/llama.dll deps/clblast/llama.dll
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           path: deps/
           name: deps
