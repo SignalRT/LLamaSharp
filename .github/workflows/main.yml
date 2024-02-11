@@ -4,12 +4,16 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     name: Test
     runs-on: ${{ matrix.os }}
     strategy:
+      max-parallel: 2
       fail-fast: false
       matrix:
         build: [linux-release, windows-release, osx-release]
